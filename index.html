@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <title>3D Heart Capricorn</title>
+    <style>
+      :root {
+        --bg: #000;
+        --metal-1: #edf4ff;
+        --metal-2: #bac8dc;
+        --metal-3: #8294ac;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        touch-action: none;
+        user-select: none;
+      }
+
+      body {
+        position: relative;
+        background:
+          radial-gradient(circle at 50% 18%, rgba(90, 110, 150, 0.25), transparent 22%),
+          radial-gradient(circle at 50% 75%, rgba(155, 170, 200, 0.06), transparent 35%),
+          #000;
+      }
+
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        background: transparent;
+      }
+
+      .hint {
+        position: absolute;
+        left: 50%;
+        bottom: max(12px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        color: rgba(232, 238, 250, 0.72);
+        letter-spacing: .35em;
+        font-size: 10px;
+        text-transform: uppercase;
+        pointer-events: none;
+        text-shadow: 0 0 12px rgba(255,255,255,0.4);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div class="hint">touch / tap</div>
+
+    <script>
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d');
+
+      const state = {
+        width: 0,
+        height: 0,
+        dpr: Math.min(window.devicePixelRatio || 1, 2),
+        particles: [],
+        pointer: { x: 0, y: 0 },
+        trails: [],
+        phase: 'heart',
+        lastTap: 0,
+        initTime: performance.now(),
+        animationStart: 0,
+      };
+
+      const heartTemplate = [];
+      const capricornTemplate = [];
+      const feiTemplate = [];
+
+      function clamp(v, min, max) {
+        return Math.min(max, Math.max(min, v));
+      }
+
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+
+      function rand(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function buildHeartTemplate() {
+        heartTemplate.length = 0;
+        const S = 1.1;
+        for (let t = -Math.PI; t <= Math.PI; t += 0.085) {
+          const x = 16 * Math.pow(Math.sin(t), 3) * S;
+          const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * S * 0.88;
+          heartTemplate.push({ x, y, z: rand(-18, 18), seed: rand(0, 1000) });
+        }
+
+        for (let i = 0; i < 180; i++) {
+          const ang = rand(0, Math.PI * 2);
+          const r = rand(0, 1.2);
+          const x = Math.cos(ang) * r * 11;
+          const y = Math.sin(ang) * r * 11 * 0.84;
+          heartTemplate.push({ x, y, z: rand(-20, 20), seed: rand(0, 1000) });
+        }
+      }
+
+      function buildCapricornTemplate() {
+        capricornTemplate.length = 0;
+        const pts = [
+          [-120, 10], [-85, 55], [-35, 90], [10, 124], [58, 95], [100, 52], [132, 10],
+          [60, -15], [30, -70], [0, -100], [-36, -145], [-90, -100], [-130, -55],
+          [-155, -110], [-118, -150], [-75, -120], [-22, -160], [18, -120]
+        ];
+
+        pts.forEach(([x, y], i) => {
+          capricornTemplate.push({ x, y, z: rand(-20, 20), r: rand(0.8, 1.3), seed: i * 0.7, phase: rand(0, Math.PI * 2) });
+        });
+
+        const extras = [
+          [-110, -20], [-60, -10], [-22, -80], [28, -32], [80, -60],
+          [-62, 36], [2, 58], [98, 10], [130, -30], [-90, -120], [20, -155]
+        ];
+        extras.forEach(([x, y], i) => {
+          capricornTemplate.push({ x, y, z: rand(-14, 22), r: rand(0.8, 1.25), seed: i * 2.1, phase: rand(0, Math.PI * 2) });
+        });
+      }
+
+      function buildFeiTemplate() {
+        feiTemplate.length = 0;
+        const raw = [
+          [-140, 0], [-100, 0], [-60, 0], [-20, 0], [20, 0], [60, 0], [100, 0], [140, 0],
+          [-140, 90], [-100, 90], [-60, 90], [-20, 90], [20, 90], [60, 90], [100, 90], [140, 90],
+          [-140, -90], [-100, -90], [-60, -90], [-20, -90], [20, -90], [60, -90], [100, -90], [140, -90],
+          [-140, -180], [-100, -180], [-60, -180], [-20, -180], [20, -180], [60, -180], [100, -180], [140, -180],
+          [-70, 180], [-20, 180], [20, 180], [70, 180],
+          [0, -260], [0, -210], [0, -150], [0, -90],
+          [-70, 0], [70, 0],
+          [-140, 180], [140, 180],
+          [-165, 120], [165, 120],
+          [-165, -120], [165, -120]
+        ];
+        raw.forEach(([x, y], i) => {
+          feiTemplate.push({ x, y, z: rand(-18, 18), r: rand(0.8, 1.4), seed: i * 1.3, phase: rand(0, Math.PI * 2) });
+        });
+      }
+
+      function createParticleFromHeart(i) {
+        const t = heartTemplate[i % heartTemplate.length] || { x: 0, y: 0, z: 0 };
+        return {
+          x: t.x,
+          y: t.y,
+          z: t.z,
+          baseX: t.x,
+          baseY: t.y,
+          baseZ: t.z,
+          vx: rand(-1.2, 1.2),
+          vy: rand(-1.2, 1.2),
+          vz: rand(-1.4, 1.4),
+          radius: rand(2.2, 5.4),
+          alpha: 1,
+          seed: rand(0, 1000),
+          phase: rand(0, Math.PI * 2),
+          glow: rand(0.7, 1.5),
+          target: null,
+        };
+      }
+
+      function resetHeart() {
+        state.particles = [];
+        for (let i = 0; i < Math.min(420, heartTemplate.length); i++) {
+          state.particles.push(createParticleFromHeart(i));
+        }
+        state.phase = 'heart';
+      }
+
+      function resize() {
+        state.width = window.innerWidth;
+        state.height = window.innerHeight;
+        state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.floor(state.width * state.dpr);
+        canvas.height = Math.floor(state.height * state.dpr);
+        canvas.style.width = `${state.width}px`;
+        canvas.style.height = `${state.height}px`;
+        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+        buildHeartTemplate();
+        buildCapricornTemplate();
+        buildFeiTemplate();
+        resetHeart();
+      }
+
+      function spawnTrail(x, y) {
+        for (let i = 0; i < 26; i++) {
+          const ang = rand(0, Math.PI * 2);
+          const s = rand(1.6, 5.8);
+          state.trails.push({
+            x,
+            y,
+            vx: Math.cos(ang) * s,
+            vy: Math.sin(ang) * s - 0.8,
+            life: rand(18, 40),
+            size: rand(1.5, 4.8),
+            alpha: 1,
+            glow: rand(0.8, 1.5),
+          });
+        }
+      }
+
+      function setBurstTarget(x, y, kind = 'spread') {
+        state.particles.forEach((p, i) => {
+          const angle = rand(0, Math.PI * 2);
+          const dist = kind === 'fall' ? rand(70, 280) : rand(80, 260);
+          const tx = x + Math.cos(angle) * dist;
+          const ty = y + Math.sin(angle) * dist;
+          p.target = {
+            x: tx,
+            y: ty,
+            z: rand(-160, 80),
+          };
+          p.vx = (Math.random() - 0.5) * 10;
+          p.vy = (Math.random() - 0.5) * 10;
+          p.vz = rand(-8, 8);
+          p.phase = rand(0, Math.PI * 2);
+        });
+      }
+
+      function triggerTap(x, y) {
+        const now = performance.now();
+        state.lastTap = now;
+        spawnTrail(x, y);
+
+        if (state.phase === 'heart') {
+          state.phase = 'scatter';
+          setBurstTarget(x, y, 'spread');
+          state.animationStart = now;
+        } else if (state.phase === 'constellation') {
+          state.phase = 'fall';
+          setBurstTarget(x, y, 'fall');
+          state.animationStart = now;
+        } else if (state.phase === 'fei') {
+          resetHeart();
+        } else {
+          state.phase = 'heart';
+          resetHeart();
+        }
+      }
+
+      function updateParticles(t) {
+        const cx = state.width * 0.5;
+        const cy = state.height * 0.5;
+
+        if (state.phase === 'heart') {
+          state.particles.forEach((p, i) => {
+            const base = heartTemplate[i % heartTemplate.length] || { x: 0, y: 0, z: 0 };
+            const px = base.x * 21 + cx * 0.08;
+            const py = base.y * 21 + cy * 0.1;
+            p.x += (px - p.x) * 0.08;
+            p.y += (py - p.y) * 0.08;
+            p.z += (base.z - p.z) * 0.08;
+
+            const pointerDX = state.pointer.x - cx;
+            const pointerDY = state.pointer.y - cy;
+            const dist = Math.hypot(p.x - pointerDX * 0.12, p.y - pointerDY * 0.12);
+            if (dist < 150) {
+              const nx = (p.x - pointerDX * 0.12) / (dist || 1);
+              const ny = (p.y - pointerDY * 0.12) / (dist || 1);
+              p.x += nx * 2.2;
+              p.y += ny * 2.2;
+            }
+          });
+        }
+
+        if (state.phase === 'scatter') {
+          const localT = (t - state.animationStart) / 800;
+          state.particles.forEach((p, i) => {
+            const target = capricornTemplate[i % capricornTemplate.length] || { x: 0, y: 0, z: 0 };
+            const tx = target.x * 0.75 + Math.sin(t * 0.001 + i) * 3.2;
+            const ty = target.y * 0.75 + Math.cos(t * 0.0014 + i * 1.3) * 3.5;
+            const tz = target.z + Math.sin(t * 0.0018 + i * 2.1) * 20;
+            const mix = clamp(localT, 0, 1);
+            p.x = lerp(p.x, tx, 0.05 + mix * 0.04);
+            p.y = lerp(p.y, ty, 0.05 + mix * 0.04);
+            p.z = lerp(p.z, tz, 0.05 + mix * 0.04);
+            if (localT > 0.95) state.phase = 'constellation';
+          });
+        }
+
+        if (state.phase === 'constellation') {
+          state.particles.forEach((p, i) => {
+            const target = capricornTemplate[i % capricornTemplate.length] || { x: 0, y: 0, z: 0 };
+            const tx = target.x * 0.75 + Math.sin(t * 0.001 + i * 0.7) * 4;
+            const ty = target.y * 0.75 + Math.cos(t * 0.0014 + i * 0.8) * 4;
+            const tz = target.z + Math.sin(t * 0.0018 + i * 1.4) * 18;
+            p.x += (tx - p.x) * 0.05;
+            p.y += (ty - p.y) * 0.05;
+            p.z += (tz - p.z) * 0.05;
+          });
+        }
+
+        if (state.phase === 'fall') {
+          state.particles.forEach((p, i) => {
+            p.vy += 0.14;
+            p.x += p.vx * 1.2;
+            p.y += p.vy;
+            p.z += p.vz * 0.9;
+            if (p.y > state.height * 0.8) {
+              p.vy *= -0.06;
+              p.vx *= 0.96;
+              p.y = state.height * 0.8;
+            }
+            if (p.y > state.height * 0.72 && i % 4 === 0) {
+              p.x += Math.sin(t * 0.006 + i) * 0.5;
+            }
+          });
+
+          const fallProgress = (t - state.animationStart) / 1400;
+          if (fallProgress > 1) {
+            state.phase = 'fei';
+            state.animationStart = t;
+          }
+        }
+
+        if (state.phase === 'fei') {
+          state.particles.forEach((p, i) => {
+            const target = feiTemplate[i % feiTemplate.length] || { x: 0, y: 0, z: 0 };
+            const tx = target.x * 0.75 + Math.sin(t * 0.001 + i * 0.8) * 3.5;
+            const ty = target.y * 0.75 + Math.cos(t * 0.0015 + i * 0.9) * 3.5;
+            const tz = target.z + Math.sin(t * 0.0012 + i * 1.5) * 12;
+            p.x += (tx - p.x) * 0.045;
+            p.y += (ty - p.y) * 0.045;
+            p.z += (tz - p.z) * 0.045;
+          });
+        }
+
+        state.trails = state.trails.filter((trail) => {
+          trail.x += trail.vx * 0.9;
+          trail.y += trail.vy * 0.9;
+          trail.life -= 1;
+          trail.alpha = clamp(trail.life / 30, 0, 1);
+          return trail.life > 0;
+        });
+      }
+
+      function drawBackground() {
+        ctx.clearRect(0, 0, state.width, state.height);
+        const g = ctx.createRadialGradient(
+          state.width * 0.5,
+          state.height * 0.55,
+          40,
+          state.width * 0.5,
+          state.height * 0.5,
+          Math.max(state.width, state.height) * 0.8
+        );
+        g.addColorStop(0, 'rgba(38,44,60,0.22)');
+        g.addColorStop(0.35, 'rgba(16,20,28,0.08)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, state.width, state.height);
+      }
+
+      function drawTrails() {
+        state.trails.forEach((trail) => {
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(228, 236, 255, ${trail.alpha * 0.7})`;
+          ctx.shadowBlur = 18 * trail.glow;
+          ctx.shadowColor = 'rgba(220, 236, 255, 0.9)';
+          ctx.arc(trail.x, trail.y, trail.size, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.shadowBlur = 0;
+      }
+
+      function project(p) {
+        const perspective = 620 / (p.z + 220);
+        return {
+          x: p.x * perspective,
+          y: p.y * perspective,
+          scale: perspective,
+        };
+      }
+
+      function drawParticles() {
+        const cx = state.width * 0.5;
+        const cy = state.height * 0.5;
+
+        const arr = [...state.particles].sort((a, b) => a.z - b.z);
+
+        arr.forEach((p) => {
+          const pr = project(p);
+          const x = cx + pr.x;
+          const y = cy + pr.y;
+          const s = clamp(pr.scale * 1.4, 1.3, 6.2);
+
+          ctx.beginPath();
+          ctx.fillStyle = `rgba(235, 240, 255, ${0.82})`;
+          ctx.shadowBlur = 16 + s * 4;
+          ctx.shadowColor = 'rgba(220, 233, 255, 0.9)';
+          ctx.arc(x, y, s, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(126, 140, 170, 0.6)';
+          ctx.arc(x - s * 0.3, y - s * 0.25, s * 0.42, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        ctx.shadowBlur = 0;
+      }
+
+      function drawHeartOutline() {
+        if (state.phase !== 'heart' && state.phase !== 'scatter') return;
+        const cx = state.width * 0.5;
+        const cy = state.height * 0.5;
+        const pts = heartTemplate.slice(0, 200);
+        ctx.beginPath();
+        pts.forEach((pt, idx) => {
+          const x = cx + pt.x * 21;
+          const y = cy + pt.y * 21 * 0.9;
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      }
+
+      let lastFrame = performance.now();
+      function animate(now) {
+        const dt = now - lastFrame;
+        lastFrame = now;
+
+        drawBackground();
+        updateParticles(now);
+        drawTrails();
+        drawParticles();
+        drawHeartOutline();
+
+        requestAnimationFrame(animate);
+      }
+
+      window.addEventListener('resize', resize, { passive: true });
+      window.addEventListener('pointermove', (event) => {
+        const rect = canvas.getBoundingClientRect();
+        state.pointer.x = event.clientX - rect.left;
+        state.pointer.y = event.clientY - rect.top;
+      }, { passive: true });
+
+      window.addEventListener('pointerdown', (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        triggerTap(x, y);
+      }, { passive: true });
+
+      resize();
+      requestAnimationFrame(animate);
+    </script>
+  </body>
+</html>
